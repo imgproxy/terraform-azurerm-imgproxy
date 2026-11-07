@@ -1,4 +1,42 @@
-mock_provider "azurerm" {}
+mock_provider "azurerm" {
+  mock_resource "azurerm_log_analytics_workspace" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.OperationalInsights/workspaces/ws" }
+  }
+  mock_resource "azurerm_cdn_frontdoor_profile" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.Cdn/profiles/profile" }
+  }
+  mock_resource "azurerm_cdn_frontdoor_endpoint" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.Cdn/profiles/profile/afdEndpoints/ep" }
+  }
+  mock_resource "azurerm_cdn_frontdoor_origin_group" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.Cdn/profiles/profile/originGroups/og" }
+  }
+  mock_resource "azurerm_cdn_frontdoor_rule_set" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.Cdn/profiles/profile/ruleSets/rs" }
+  }
+  mock_resource "azurerm_container_app_environment" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.App/managedEnvironments/env" }
+  }
+  mock_resource "azurerm_user_assigned_identity" {
+    defaults = {
+      id           = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id"
+      principal_id = "00000000-0000-0000-0000-000000000001"
+      client_id    = "00000000-0000-0000-0000-000000000002"
+    }
+  }
+  mock_resource "azurerm_cdn_frontdoor_origin" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.Cdn/profiles/profile/originGroups/og/origins/o" }
+  }
+  mock_resource "azurerm_cdn_frontdoor_custom_domain" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.Cdn/profiles/profile/customDomains/cd" }
+  }
+  mock_resource "azurerm_cdn_frontdoor_rule" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.Cdn/profiles/profile/ruleSets/rs/rules/r" }
+  }
+  mock_resource "azurerm_cdn_frontdoor_route" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.Cdn/profiles/profile/afdEndpoints/ep/routes/rt" }
+  }
+}
 
 variables {
   resource_group_name = "test-rg"
@@ -63,7 +101,7 @@ run "key_vault_iam_granted" {
 }
 
 run "secrets_map_creates_container_app_secrets" {
-  command = plan
+  command = apply
 
   variables {
     secrets = {
@@ -143,7 +181,7 @@ run "cache_storage_grants_contributor" {
 }
 
 run "monitoring_configures_otel" {
-  command = plan
+  command = apply
 
   variables {
     enable_monitoring = true

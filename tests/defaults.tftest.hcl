@@ -1,4 +1,42 @@
-mock_provider "azurerm" {}
+mock_provider "azurerm" {
+  mock_resource "azurerm_log_analytics_workspace" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.OperationalInsights/workspaces/ws" }
+  }
+  mock_resource "azurerm_cdn_frontdoor_profile" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.Cdn/profiles/profile" }
+  }
+  mock_resource "azurerm_cdn_frontdoor_endpoint" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.Cdn/profiles/profile/afdEndpoints/ep" }
+  }
+  mock_resource "azurerm_cdn_frontdoor_origin_group" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.Cdn/profiles/profile/originGroups/og" }
+  }
+  mock_resource "azurerm_cdn_frontdoor_rule_set" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.Cdn/profiles/profile/ruleSets/rs" }
+  }
+  mock_resource "azurerm_container_app_environment" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.App/managedEnvironments/env" }
+  }
+  mock_resource "azurerm_user_assigned_identity" {
+    defaults = {
+      id           = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id"
+      principal_id = "00000000-0000-0000-0000-000000000001"
+      client_id    = "00000000-0000-0000-0000-000000000002"
+    }
+  }
+  mock_resource "azurerm_cdn_frontdoor_origin" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.Cdn/profiles/profile/originGroups/og/origins/o" }
+  }
+  mock_resource "azurerm_cdn_frontdoor_custom_domain" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.Cdn/profiles/profile/customDomains/cd" }
+  }
+  mock_resource "azurerm_cdn_frontdoor_rule" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.Cdn/profiles/profile/ruleSets/rs/rules/r" }
+  }
+  mock_resource "azurerm_cdn_frontdoor_route" {
+    defaults = { id = "/subscriptions/12345678-1234-9876-4563-123456789012/resourceGroups/test-rg/providers/Microsoft.Cdn/profiles/profile/afdEndpoints/ep/routes/rt" }
+  }
+}
 
 variables {
   resource_group_name = "test-rg"
@@ -147,7 +185,7 @@ run "cdn_with_domains" {
 }
 
 run "timeout_sets_env_var_and_cdn" {
-  command = plan
+  command = apply
 
   variables {
     timeout     = 120
@@ -162,7 +200,7 @@ run "timeout_sets_env_var_and_cdn" {
 }
 
 run "timeout_null_no_env_var" {
-  command = plan
+  command = apply
 
   assert {
     condition     = length([for e in azurerm_container_app.main.template[0].container[0].env : e if e.name == "IMGPROXY_TIMEOUT"]) == 0
@@ -171,7 +209,7 @@ run "timeout_null_no_env_var" {
 }
 
 run "workers_calculation" {
-  command = plan
+  command = apply
 
   variables {
     cpu = 0.75
@@ -184,7 +222,7 @@ run "workers_calculation" {
 }
 
 run "custom_workers_override" {
-  command = plan
+  command = apply
 
   variables {
     cpu     = 1
