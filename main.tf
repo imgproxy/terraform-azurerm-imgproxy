@@ -144,7 +144,7 @@ resource "azurerm_user_assigned_identity" "imgproxy" {
       error_message = "keys_secret and salts_secret are required when insecure = false."
     }
     precondition {
-      condition     = var.cache_storage_account == null || !contains(var.source_storage_accounts, var.cache_storage_account)
+      condition     = var.cache_storage_account == null ? true : !contains(var.source_storage_accounts, var.cache_storage_account)
       error_message = "cache_storage_account must not also be a source storage account: the cache role grants write access, so imgproxy could overwrite source images."
     }
     precondition {
