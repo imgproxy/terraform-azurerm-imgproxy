@@ -98,7 +98,7 @@ module "imgproxy" {
   pro_license_key_secret = {
     id = "${local.secrets_uri}/imgproxy-pro-license"
   }
-  pro_registry_password_secret = {
+  repo_password_secret = {
     id = "${local.secrets_uri}/imgproxy-pro-password"
   }
 
@@ -159,6 +159,11 @@ output "url" {
 output "cdn_hostname" {
   description = "Front Door endpoint hostname (when CDN enabled)"
   value       = module.imgproxy.cdn_endpoint_hostname
+}
+
+output "cdn_validation_tokens" {
+  description = "DNS TXT validation tokens for custom domains (when CDN enabled)"
+  value       = module.imgproxy.cdn_custom_domain_validation_tokens
 }
 
 output "monitoring_application_insights_id" {

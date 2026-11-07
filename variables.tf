@@ -26,7 +26,7 @@ variable "tag" {
 variable "repo" {
   type        = string
   default     = null
-  description = "Custom container repository to use. When set, overrides the repository constructed from 'pro'. Combined with 'tag' to form the full image reference (e.g. 'myregistry.azurecr.io/imgproxy')."
+  description = "Custom container repository to use. When set, overrides the repository constructed from 'pro'. Combined with 'tag' to form the full image reference (e.g. 'myregistry.azurecr.io/imgproxy'). For a private registry set repo_username and repo_password_secret."
 }
 
 variable "environment" {
@@ -114,7 +114,7 @@ variable "source_url_encryption_key_secret" {
 variable "key_vault_id" {
   type        = string
   default     = null
-  description = "Resource ID of the Azure Key Vault that holds imgproxy secrets. The managed identity will be granted Key Vault Secrets User on this vault. Required when any secrets are configured."
+  description = "Resource ID of the Azure Key Vault that holds imgproxy secrets. The managed identity will be granted Key Vault Secrets User on each secret the module uses (not on the whole vault). Required when any secrets are configured."
 }
 
 # ── Compute Resources ─────────────────────────────────────────────────────────
@@ -179,13 +179,19 @@ variable "pro" {
   description = "Use imgproxy Pro (docker.imgproxy.pro) instead of the community image (ghcr.io)."
 }
 
-variable "pro_registry_password_secret" {
+variable "repo_username" {
+  type        = string
+  default     = null
+  description = "Username for the registry in 'repo'. Defaults to 'imgproxy' for docker.imgproxy.pro when 'repo' is not set. Required with repo_password_secret otherwise."
+}
+
+variable "repo_password_secret" {
   type = object({
     id      = string
     version = optional(string, "")
   })
   default     = null
-  description = "Key Vault secret URI for the docker.imgproxy.pro registry password. Required when pro = true and repo = null."
+  description = "Key Vault secret URI for the registry password (for docker.imgproxy.pro, or for 'repo' when set). Required when pro = true and repo is not set. The identity is granted read access to this secret."
 }
 
 variable "pro_license_key_secret" {

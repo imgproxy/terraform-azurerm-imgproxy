@@ -15,7 +15,7 @@ This example demonstrates a full-featured imgproxy deployment with all available
 
 ## Azure setup
 
-You need an Azure subscription and the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), authenticated:
+You need an Azure subscription and the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), authenticated (the [permissions](../../README.md#permissions) the module needs are described in the repository root):
 
 ```bash
 az login
@@ -110,7 +110,7 @@ terraform output url
 terraform output cdn_hostname
 
 # Create a CNAME record pointing cdn.example.com to this hostname, plus the _dnsauth TXT record
-# from `terraform output module.imgproxy.cdn_custom_domain_validation_tokens`
+# from `terraform output cdn_validation_tokens`
 # Azure provisions a managed TLS certificate automatically once the domain validates
 ```
 

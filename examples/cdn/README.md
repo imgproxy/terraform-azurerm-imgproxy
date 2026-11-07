@@ -6,7 +6,7 @@ placeholder images, so no storage account is needed.
 
 ## Azure setup
 
-You need an Azure subscription and the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), authenticated:
+You need an Azure subscription and the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), authenticated (the [permissions](../../README.md#permissions) the module needs are described in the repository root):
 
 ```bash
 az login
@@ -80,7 +80,7 @@ In [main.tf](main.tf), uncomment `cdn_domains` and set your domain. After `terra
 
 Front Door then validates the domain and provisions the managed certificate, which can take up to an hour.
 
-## Notes
+## Origin access and caching
 
 - `cdn_redirect_http_to_https = true` (default) redirects HTTP to HTTPS at Front Door.
 - `secret_secret` (Bearer auth) cannot be combined with the CDN: Front Door does not forward the `Authorization` header.

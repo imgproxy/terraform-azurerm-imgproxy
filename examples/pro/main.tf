@@ -65,7 +65,7 @@ module "imgproxy" {
 
   # pro selects docker.imgproxy.pro/imgproxy as the default repo
   pro = true
-  pro_registry_password_secret = {
+  repo_password_secret = {
     id = "${local.secrets_uri}/imgproxy-pro-password"
   }
   pro_license_key_secret = {

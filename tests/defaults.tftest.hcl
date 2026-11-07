@@ -45,7 +45,7 @@ run "pro_image_url" {
       id      = "https://test-kv.vault.azure.net/secrets/imgproxy-license"
       version = ""
     }
-    pro_registry_password_secret = {
+    repo_password_secret = {
       id      = "https://test-kv.vault.azure.net/secrets/docker-password"
       version = ""
     }
@@ -246,4 +246,55 @@ run "key_vault_access_is_per_secret" {
     )
     error_message = "Key Vault Secrets User must be scoped to each secret, not the vault"
   }
+}
+
+run "custom_registry_uses_credentials" {
+  command = plan
+
+  variables {
+    repo          = "registry.example.com/imgproxy"
+    repo_username = "deploy"
+    repo_password_secret = {
+      id = "https://test-kv.vault.azure.net/secrets/registry-password"
+    }
+  }
+
+  assert {
+    condition     = azurerm_container_app.main.registry[0].server == "registry.example.com"
+    error_message = "The registry server must be the host of repo"
+  }
+
+  assert {
+    condition     = azurerm_container_app.main.registry[0].username == "deploy"
+    error_message = "The registry must use repo_username"
+  }
+}
+
+run "pro_registry_defaults_username" {
+  command = plan
+
+  variables {
+    pro = true
+    repo_password_secret = {
+      id = "https://test-kv.vault.azure.net/secrets/docker-password"
+    }
+  }
+
+  assert {
+    condition     = azurerm_container_app.main.registry[0].server == "docker.imgproxy.pro" && azurerm_container_app.main.registry[0].username == "imgproxy"
+    error_message = "Pro must authenticate to docker.imgproxy.pro as imgproxy"
+  }
+}
+
+run "custom_registry_requires_username" {
+  command = plan
+
+  variables {
+    repo = "registry.example.com/imgproxy"
+    repo_password_secret = {
+      id = "https://test-kv.vault.azure.net/secrets/registry-password"
+    }
+  }
+
+  expect_failures = [azurerm_user_assigned_identity.imgproxy]
 }

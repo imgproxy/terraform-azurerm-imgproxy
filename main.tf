@@ -77,14 +77,17 @@ locals {
   # Key Vault secret URIs the identity needs to read, keyed by env var / secret name
   key_vault_secret_uris = merge(
     { for k, v in local.secrets_config : k => v.uri },
-    local.pro_registry_uses_kv ? { "pro-registry-password" = local.pro_registry_secret_uri } : {},
+    local.registry_uses_kv ? { "repo-password" = local.registry_secret_uri } : {},
   )
 
-  pro_registry_uses_kv = var.pro && var.repo == null && var.pro_registry_password_secret != null
-  pro_registry_secret_uri = local.pro_registry_uses_kv ? (
-    var.pro_registry_password_secret.version != "" && var.pro_registry_password_secret.version != "latest" ?
-    "${var.pro_registry_password_secret.id}/${var.pro_registry_password_secret.version}" :
-    var.pro_registry_password_secret.id
+  # Registry credentials: the password lives in Key Vault; the username defaults to "imgproxy" for docker.imgproxy.pro
+  registry_uses_kv = var.repo_password_secret != null
+  registry_user    = var.repo_username != null ? var.repo_username : (var.repo == null && var.pro ? "imgproxy" : null)
+  registry_server  = split("/", local.image_repo)[0]
+  registry_secret_uri = local.registry_uses_kv ? (
+    var.repo_password_secret.version != "" && var.repo_password_secret.version != "latest" ?
+    "${var.repo_password_secret.id}/${var.repo_password_secret.version}" :
+    var.repo_password_secret.id
   ) : null
 
   monitoring_workspace_id = !var.enable_monitoring ? null : (
@@ -129,8 +132,12 @@ resource "azurerm_user_assigned_identity" "imgproxy" {
 
   lifecycle {
     precondition {
-      condition     = !var.pro || var.pro_registry_password_secret != null || var.repo != null
-      error_message = "pro_registry_password_secret is required when pro = true and repo is not set."
+      condition     = !var.pro || var.repo != null || var.repo_password_secret != null
+      error_message = "repo_password_secret is required when pro = true and repo is not set."
+    }
+    precondition {
+      condition     = var.repo_password_secret == null || local.registry_user != null
+      error_message = "repo_username is required when repo_password_secret is set."
     }
     precondition {
       condition     = var.insecure || (var.keys_secret != null && var.salts_secret != null)
@@ -260,23 +267,23 @@ resource "azurerm_container_app" "main" {
     }
   }
 
-  # Pro registry password secret (used in the registry block below)
+  # Registry password secret (used in the registry block below)
   dynamic "secret" {
-    for_each = local.pro_registry_uses_kv ? [1] : []
+    for_each = local.registry_uses_kv ? [1] : []
     content {
-      name                = "pro-registry-password"
-      key_vault_secret_id = local.pro_registry_secret_uri
+      name                = "repo-password"
+      key_vault_secret_id = local.registry_secret_uri
       identity            = local.identity_id
     }
   }
 
-  # Authenticate to docker.imgproxy.pro for Pro images
+  # Authenticate to the registry of 'repo' (docker.imgproxy.pro for Pro images by default)
   dynamic "registry" {
-    for_each = local.pro_registry_uses_kv ? [1] : []
+    for_each = local.registry_uses_kv ? [1] : []
     content {
-      server               = "docker.imgproxy.pro"
-      username             = "imgproxy"
-      password_secret_name = "pro-registry-password"
+      server               = local.registry_server
+      username             = local.registry_user
+      password_secret_name = "repo-password"
     }
   }
 
@@ -331,7 +338,7 @@ resource "azurerm_container_app" "main" {
       for_each = var.enable_monitoring ? [1] : []
       content {
         name   = "otel-collector"
-        image  = "otel/opentelemetry-collector-contrib:0.164.1"
+        image  = "otel/opentelemetry-collector-contrib:0.164.0"
         cpu    = 0.25
         memory = "0.5Gi"
 
@@ -434,10 +441,10 @@ resource "azurerm_cdn_frontdoor_origin" "main" {
   enabled                       = true
 
   certificate_name_check_enabled = true
-  host_name                      = azurerm_container_app.main.latest_revision_fqdn
+  host_name                      = azurerm_container_app.main.ingress[0].fqdn
   http_port                      = 80
   https_port                     = 443
-  origin_host_header             = azurerm_container_app.main.latest_revision_fqdn
+  origin_host_header             = azurerm_container_app.main.ingress[0].fqdn
   priority                       = 1
   weight                         = 1000
 }
@@ -466,6 +473,9 @@ resource "azurerm_cdn_frontdoor_rule" "cache_ttl" {
   cdn_frontdoor_rule_set_id = azurerm_cdn_frontdoor_rule_set.cache[0].id
   order                     = 1
   behavior_on_match         = "Continue"
+
+  # Front Door rejects rules until the origin group has an enabled origin
+  depends_on = [azurerm_cdn_frontdoor_origin.main]
 
   actions {
     route_configuration_override_action {

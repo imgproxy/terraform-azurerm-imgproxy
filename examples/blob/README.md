@@ -5,7 +5,7 @@ imgproxy reading source images from a private Blob Storage container via the `ab
 
 ## Azure setup
 
-You need an Azure subscription and the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), authenticated:
+You need an Azure subscription and the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), authenticated (the [permissions](../../README.md#permissions) the module needs are described in the repository root):
 
 ```bash
 az login

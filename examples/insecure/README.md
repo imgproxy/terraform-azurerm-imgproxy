@@ -8,9 +8,22 @@ limits, public access, no monitoring and no Blob Storage. It fetches public plac
 > imgproxy (unlimited bandwidth costs, no protection against abuse, no control over processed images). Never use
 > this configuration in production.
 
+## Testing opt-ins
+
+The module is private by default: the Container App is reachable only inside the Container Apps Environment. This
+example has no private network and no CDN, so it waives that default explicitly:
+
+```hcl
+allow_unauthenticated = true # expose the app to the internet so that you can open it in a browser
+```
+
+Every example in this repository does the same (except [cdn](../cdn/), where Front Door forces it), for testing only.
+In production, keep the app private or rely on request signing (see [signed](../signed/)) and put a CDN or other
+gateway in front of it.
+
 ## Azure setup
 
-You need an Azure subscription and the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), authenticated:
+You need an Azure subscription and the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), authenticated (the [permissions](../../README.md#permissions) the module needs are described in the repository root):
 
 ```bash
 az login

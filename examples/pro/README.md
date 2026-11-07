@@ -5,7 +5,7 @@ storage account is needed.
 
 ## Azure setup
 
-You need an Azure subscription and the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), authenticated:
+You need an Azure subscription and the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), authenticated (the [permissions](../../README.md#permissions) the module needs are described in the repository root):
 
 ```bash
 az login
@@ -16,7 +16,7 @@ export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
 ## Prerequisites
 
 Create a resource group, a Key Vault with the imgproxy Pro secrets (`imgproxy-pro-password` is the
-`docker.imgproxy.pro` registry password, passed as `pro_registry_password_secret`) and the signing keys
+`docker.imgproxy.pro` registry password, passed as `repo_password_secret`) and the signing keys
 (see [signed](../signed/)), and a private storage account for the result cache:
 
 ```bash

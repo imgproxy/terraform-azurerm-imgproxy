@@ -1,545 +1,39 @@
 # imgproxy Terraform Module for Azure Container Apps
 
-Terraform module to deploy [imgproxy](https://imgproxy.net/) on Azure Container Apps with optional Azure Front Door CDN, Azure Blob Storage integration, OpenTelemetry monitoring to Azure Monitor, and Key Vault secrets management.
+Terraform module to deploy [imgproxy](https://imgproxy.net/) on Azure Container Apps with optional Azure Front Door, OpenTelemetry-based monitoring and Azure Blob Storage integration.
 
 ## Features
 
-- **Azure Container Apps deployment** with configurable CPU, memory, and scaling
-- **Azure Front Door Standard CDN** for global caching and low-latency image delivery
-- **imgproxy Pro support** with direct docker.imgproxy.pro registry authentication
-- **Azure Blob Storage integration** for source images and result cache (Pro)
-- **Request signing** with configurable keys and salts
-- **Azure Key Vault integration** for all sensitive configuration via Managed Identity
-- **User Assigned Managed Identity** with least-privilege role assignments
-- **OpenTelemetry collector sidecar** for traces, metrics, and logs exported to Azure Monitor by default
-- **VNet integration** support via Container App Environment subnet
+The module creates the required resources:
 
-## Prerequisites
+- Container App, with a Container Apps Environment and Log Analytics workspace (or use your own environment)
+- User-assigned managed identity (or use your own), with role assignments for Key Vault and Blob Storage
+- Azure Front Door Standard (optional)
+- OpenTelemetry collector sidecar with Application Insights for Azure Monitor (optional)
 
-- **An Azure account and subscription** — [Create a free account](https://azure.microsoft.com/free/) if needed
-- **Azure CLI** — [Install](https://docs.microsoft.com/cli/azure/install-azure-cli) and authenticate:
-  ```bash
-  az login
-  az account set --subscription "<your-subscription-id>"
-  ```
-- **Terraform** — [Install](https://developer.hashicorp.com/terraform/install) (version 1.5 or later)
-- **A resource group** — Create one before deploying:
-  ```bash
-  az group create --name imgproxy-dev --location germanywestcentral
-  ```
-- **A provider(s)** - Register `Microsoft.App`:
-  ```bash
-  az provider register --namespace Microsoft.App --wait
-  ```
+Also supported: request signing, imgproxy Pro through Key Vault secrets, Blob Storage as image source and result cache (Pro). Private by default ([details](#secure-defaults)).
 
-  If you plan to use monitoring, register `Microsoft.Insights`:
-  ```bash
-  az provider register --namespace Microsoft.Insights --wait
-  ```
+## Usage
 
-## Getting Started
-
-```bash
-mkdir imgproxy-azure
-cd imgproxy-azure
-# create main.tf (see examples below)
-terraform init
-terraform plan
-terraform apply
-```
-
-## Usage Examples
-
-Examples are ordered from simplest to most advanced.
-
----
-
-### 1. Development Setup (Insecure Mode)
-
-**⚠️ WARNING:** This configuration disables request signing. **Never use in production.**
-
-**Create `main.tf`:**
 ```hcl
 module "imgproxy" {
-  source = "github.com/imgproxy/terraform-azurerm-imgproxy"
+  source  = "imgproxy/imgproxy/azurerm"
+  version = "~> 0.1"
 
-  resource_group_name = "imgproxy-dev"
+  resource_group_name = "imgproxy"
   location            = "germanywestcentral"
-  allow_unauthenticated = true # testing opt-in: expose the app publicly (see Security)
+  service_name        = "imgproxy"
 
-  insecure = true
-}
+  # Reachable from the internet (the default is internal to the Container Apps Environment)
+  allow_unauthenticated = true
 
-output "url" {
-  value = module.imgproxy.url
-}
-```
-
-**Deploy and test:**
-```bash
-terraform init && terraform apply
-
-URL=$(terraform output -raw url)
-curl "$URL/health"
-curl -I "$URL/insecure/plain/https://picsum.photos/200"
-```
-
----
-
-### 2. Production Setup with URL Signing
-
-**First, create signing keys in Key Vault:**
-
-```bash
-# Create Key Vault
-az keyvault create --name imgproxy-dev-vault --resource-group imgproxy-dev --location germanywestcentral
-
-# Grant yourself permissios
-az role assignment create \
-  --role "Key Vault Secrets Officer" \
-  --assignee $(az ad signed-in-user show --query id -o tsv) \
-  --scope $(az keyvault show --name imgproxy-dev-vault --resource-group imgproxy-dev --query id -o tsv)
-
-# Generate and store signing key + salt
-az keyvault secret set \
-  --vault-name imgproxy-dev-vault \
-  --name imgproxy-key \
-  --value "$(openssl rand -hex 64)"
-
-az keyvault secret set \
-  --vault-name imgproxy-dev-vault \
-  --name imgproxy-salt \
-  --value "$(openssl rand -hex 64)"
-
-# Get the Key Vault resource ID for key_vault_id variable
-az keyvault show --name imgproxy-dev-vault --query id -o tsv
-```
-
-**Create `main.tf`:**
-```hcl
-variable "key_vault_id" {
-  type = string
-}
-
-module "imgproxy" {
-  source = "github.com/imgproxy/terraform-azurerm-imgproxy"
-
-  resource_group_name = "imgproxy-dev"
-  location            = "germanywestcentral"
-  allow_unauthenticated = true # testing opt-in: expose the app publicly (see Security)
-
-  key_vault_id = var.key_vault_id
-
-  keys_secret = {
-    id = "https://imgproxy-dev-vault.vault.azure.net/secrets/imgproxy-key"
-  }
-  salts_secret = {
-    id = "https://imgproxy-dev-vault.vault.azure.net/secrets/imgproxy-salt"
-  }
-}
-
-output "url" {
-  value = module.imgproxy.url
+  key_vault_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/imgproxy/providers/Microsoft.KeyVault/vaults/my-vault"
+  keys_secret  = { id = "https://my-vault.vault.azure.net/secrets/imgproxy-keys" }
+  salts_secret = { id = "https://my-vault.vault.azure.net/secrets/imgproxy-salts" }
 }
 ```
 
-**Deploy:**
-```bash
-terraform apply -var key_vault_id="$(az keyvault show --name imgproxy-dev-vault --query id -o tsv)"
-```
-
----
-
-### 3. Azure Blob Storage Integration
-
-**What you get:** imgproxy reads source images directly from private Azure Blob Storage using the `abs://` URL scheme. The managed identity is granted `Storage Blob Data Reader` automatically.
-
-**Create `main.tf`:**
-```hcl
-variable "key_vault_id" { type = string }
-
-resource "azurerm_storage_account" "images" {
-  name                     = "myimgproxyimages"
-  resource_group_name      = "imgproxy-dev"
-}
-
-module "imgproxy" {
-  source = "github.com/imgproxy/terraform-azurerm-imgproxy"
-
-  resource_group_name = "imgproxy-dev"
-  location            = "germanywestcentral"
-  allow_unauthenticated = true # testing opt-in: expose the app publicly (see Security)
-  key_vault_id        = var.key_vault_id
-
-  keys_secret  = { id = "https://imgproxy-dev-vault.vault.azure.net/secrets/imgproxy-key" }
-  salts_secret = { id = "https://imgproxy-dev-vault.vault.azure.net/secrets/imgproxy-salt" }
-
-  # Grant Storage Blob Data Reader and enable abs:// URL scheme
-  source_storage_accounts = [azurerm_storage_account.images.id]
-}
-```
-
-**Upload and process images:**
-```bash
-az storage blob upload \
-  --account-name myimgproxyimages \
-  --container-name photos \
-  --name photo.jpg \
-  --file ./photo.jpg
-
-# Use abs://container/blob in imgproxy URLs (the storage account is set via IMGPROXY_ABS_NAME)
-# (requires a signed URL — see https://docs.imgproxy.net/usage/signing_the_url)
-```
-
----
-
-### 4. imgproxy Pro with License Key
-
-**Store Pro secrets in Key Vault:**
-```bash
-az keyvault secret set --vault-name imgproxy-dev-vault \
-  --name imgproxy-pro-password --value "your-registry-password"
-
-az keyvault secret set --vault-name imgproxy-dev-vault \
-  --name imgproxy-pro-license --value "your-license-key"
-```
-
-**Create `main.tf`:**
-```hcl
-variable "key_vault_id" { type = string }
-
-resource "azurerm_storage_account" "source" {
-  name                     = "myimgproxysrc"
-  resource_group_name      = "imgproxy-dev"
-}
-
-resource "azurerm_storage_account" "cache" {
-  name                     = "myimgproxycache"
-  resource_group_name      = "imgproxy-dev"
-}
-
-module "imgproxy" {
-  source = "github.com/imgproxy/terraform-azurerm-imgproxy"
-
-  resource_group_name = "imgproxy-dev"
-  location            = "germanywestcentral"
-  allow_unauthenticated = true # testing opt-in: expose the app publicly (see Security)
-  tag                 = "v4"
-  key_vault_id        = var.key_vault_id
-
-  # Enable Pro edition
-  pro = true
-  pro_registry_password_secret = {
-    id = "https://imgproxy-dev-vault.vault.azure.net/secrets/imgproxy-pro-password"
-  }
-  pro_license_key_secret = {
-    id = "https://imgproxy-dev-vault.vault.azure.net/secrets/imgproxy-pro-license"
-  }
-
-  # Request signing
-  keys_secret  = { id = "https://imgproxy-dev-vault.vault.azure.net/secrets/imgproxy-key" }
-  salts_secret = { id = "https://imgproxy-dev-vault.vault.azure.net/secrets/imgproxy-salt" }
-
-  # Storage: source images + result cache (Pro feature)
-  source_storage_accounts = [azurerm_storage_account.source.id]
-  cache_storage_account   = azurerm_storage_account.cache.id
-
-  environment = {
-    IMGPROXY_CACHE_USE    = "abs"
-    IMGPROXY_CACHE_BUCKET = "imgproxy-cache" # container name within the storage account
-  }
-}
-
-output "url" {
-  value = module.imgproxy.url
-}
-```
-
----
-
-### 5. Custom Image Override
-
-Use any registry instead of the defaults (`ghcr.io` for community, `docker.imgproxy.pro` for Pro):
-
-```hcl
-module "imgproxy" {
-  source = "github.com/imgproxy/terraform-azurerm-imgproxy"
-
-  resource_group_name = "imgproxy-dev"
-  location            = "germanywestcentral"
-  allow_unauthenticated = true # testing opt-in: expose the app publicly (see Security)
-
-  # Pull from your own Azure Container Registry
-  repo = "myregistry.azurecr.io/imgproxy"
-  tag  = "v4"
-
-  key_vault_id = var.key_vault_id
-  keys_secret  = { id = "https://imgproxy-dev-vault.vault.azure.net/secrets/imgproxy-key" }
-  salts_secret = { id = "https://imgproxy-dev-vault.vault.azure.net/secrets/imgproxy-salt" }
-}
-```
-
-When `repo` is set, the module skips configuring registry credentials — your ACR must already be accessible from the Container App (use a system-assigned identity or an attached ACR integration at the environment level).
-
----
-
-### 6. Azure Front Door CDN for Global Low-Latency Access
-
-**What you get:** Azure Front Door Standard profiles your Container App as an origin, caches processed images at global PoPs, and provisions managed TLS certificates for your custom domains.
-
-**Important:** You need a domain name. DNS validation is required for managed certificates.
-
-**Create `main.tf`:**
-```hcl
-variable "key_vault_id" { type = string }
-
-module "imgproxy" {
-  source = "github.com/imgproxy/terraform-azurerm-imgproxy"
-
-  resource_group_name = "imgproxy-dev"
-  location            = "germanywestcentral"
-  key_vault_id        = var.key_vault_id
-
-  keys_secret  = { id = "https://imgproxy-dev-vault.vault.azure.net/secrets/imgproxy-key" }
-  salts_secret = { id = "https://imgproxy-dev-vault.vault.azure.net/secrets/imgproxy-salt" }
-
-  enable_cdn  = true
-  cdn_domains = ["cdn.example.com"]
-
-  cdn_default_ttl            = 3600    # 1 hour cache
-  cdn_redirect_http_to_https = true
-}
-
-output "cdn_endpoint" {
-  value       = module.imgproxy.cdn_endpoint_hostname
-  description = "Create a CNAME record pointing cdn.example.com → this hostname"
-}
-
-output "validation_tokens" {
-  value       = module.imgproxy.cdn_custom_domain_validation_tokens
-  description = "Add these as DNS TXT records to validate managed certificates"
-}
-```
-
-**Configure DNS:**
-```bash
-terraform apply
-
-# 1. Create a CNAME:
-#    cdn.example.com  CNAME  <cdn_endpoint hostname>
-
-# 2. Add the TXT validation record shown in validation_tokens output.
-#    Front Door auto-provisions the managed TLS certificate once validated.
-```
-
-**Note:** Unlike GCP Cloud CDN, Azure Front Door uses a CNAME target (not a static IP). The Container App origin remains public so Front Door can reach it — restrict origin access at the application level if needed.
-
----
-
-### 7. Additional Secrets
-
-Pass any extra Key Vault secrets as environment variables for third-party integrations:
-
-```hcl
-az keyvault secret set --vault-name imgproxy-dev-vault \
-  --name newrelic-license --value "your-newrelic-license"
-
-module "imgproxy" {
-  source = "github.com/imgproxy/terraform-azurerm-imgproxy"
-  # ... core config ...
-
-  secrets = {
-    IMGPROXY_NEW_RELIC_KEY = {
-      id = "https://imgproxy-dev-vault.vault.azure.net/secrets/newrelic-license"
-    }
-    IMGPROXY_SENTRY_DSN = {
-      id      = "https://imgproxy-dev-vault.vault.azure.net/secrets/sentry-dsn"
-      version = "abc123def456"  # pin to a specific version
-    }
-  }
-}
-```
-
----
-
-## Requirements
-
-| Name | Version |
-|------|---------|
-| terraform | >= 1.5 |
-| azurerm | ~> 4.0 |
-
-## Providers
-
-| Name | Version |
-|------|---------|
-| azurerm | ~> 4.0 |
-
-## Inputs
-
-### Core Configuration
-
-| Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
-| resource_group_name | Azure resource group name | `string` | n/a | yes |
-| location | Azure region (e.g. `"germanywestcentral"`, `"westeurope"`) | `string` | `"germanywestcentral"` | no |
-| service_name | Prefix applied to every resource name | `string` | `"imgproxy"` | no |
-| tag | imgproxy image tag or digest (e.g. `v4`, `sha256:...`) | `string` | `"v4"` | no |
-| repo | Custom container repository, overrides the default | `string` | `null` | no |
-| pro | Use imgproxy Pro instead of community image | `bool` | `false` | no |
-| environment | Additional environment variables for imgproxy | `map(string)` | `{}` | no |
-| secrets | Map of env var names to Key Vault secret objects | `map(object({ id, version }))` | `{}` | no |
-| tags | Azure resource tags applied to all resources | `map(string)` | `{}` | no |
-
-### Security & Signing
-
-| Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
-| key_vault_id | Resource ID of the Azure Key Vault holding secrets. Grants `Key Vault Secrets User` to the managed identity, scoped to each secret the module uses (not the whole vault). | `string` | `null` | yes (if secrets used) |
-| insecure | Disable URL signature checks (development only) | `bool` | `false` | no |
-| keys_secret | Key Vault secret URI for signing keys ([`IMGPROXY_KEY`](https://docs.imgproxy.net/configuration/options#IMGPROXY_KEY)) | `object({ id, version? })` | `null` | yes (unless insecure) |
-| salts_secret | Key Vault secret URI for signing salts ([`IMGPROXY_SALT`](https://docs.imgproxy.net/configuration/options#IMGPROXY_SALT)) | `object({ id, version? })` | `null` | yes (unless insecure) |
-| signature_size | Number of bytes from key/salt used for signing ([`IMGPROXY_SIGNATURE_SIZE`](https://docs.imgproxy.net/configuration/options#IMGPROXY_SIGNATURE_SIZE)) | `number` | `32` | no |
-| secret_secret | Key Vault secret URI for authorization token ([`IMGPROXY_SECRET`](https://docs.imgproxy.net/configuration/options#IMGPROXY_SECRET)) | `object({ id, version? })` | `null` | no |
-| trusted_signatures_secret | Key Vault secret URI for trusted signature prefixes ([`IMGPROXY_TRUSTED_SIGNATURES`](https://docs.imgproxy.net/configuration/options#IMGPROXY_TRUSTED_SIGNATURES)) (Pro only) | `object({ id, version? })` | `null` | no |
-| source_url_encryption_key_secret | Key Vault secret URI for source URL encryption key ([`IMGPROXY_SOURCE_URL_ENCRYPTION_KEY`](https://docs.imgproxy.net/configuration/options#IMGPROXY_SOURCE_URL_ENCRYPTION_KEY)) | `object({ id, version? })` | `null` | no |
-
-### imgproxy Pro Configuration
-
-| Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
-| pro_registry_password_secret | Key Vault secret URI for docker.imgproxy.pro registry password | `object({ id, version? })` | `null` | yes (if pro = true) |
-| pro_license_key_secret | Key Vault secret URI for Pro license key ([`IMGPROXY_LICENSE_KEY`](https://docs.imgproxy.net/configuration/options#IMGPROXY_LICENSE_KEY)) | `object({ id, version? })` | `null` | no |
-
-### Observability
-
-| Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
-| enable_monitoring | Enable the OpenTelemetry collector sidecar and export traces, metrics, and logs to Azure Monitor by default. Automatically configures imgproxy OTEL environment variables. | `bool` | `false` | no |
-| otel_collector_config | OpenTelemetry collector config passed to the OTEL sidecar when monitoring is enabled. Supports collector environment variable expansion such as `$${env:APPLICATIONINSIGHTS_CONNECTION_STRING}`. | `string` | built-in OTLP to Azure Monitor config | no |
-
-### Storage Integration
-
-| Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
-| source_storage_accounts | Resource IDs of Azure Storage Accounts for source images. Grants `Storage Blob Data Reader`. Enables [`IMGPROXY_USE_ABS`](https://docs.imgproxy.net/configuration/options#IMGPROXY_USE_ABS). Sets `AZURE_CLIENT_ID` for identity disambiguation. | `list(string)` | `[]` | no |
-| cache_storage_account | Resource ID of an Azure Storage Account for result cache (Pro only). Grants `Storage Blob Data Contributor`. Must not also be listed in `source_storage_accounts`. | `string` | `null` | no |
-
-### Compute Resources
-
-| Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
-| cpu | CPU cores for the container (valid Container Apps values: 0.25–4.0) | `number` | `1.0` | no |
-| memory | Memory limit, must pair with cpu (e.g. `"2Gi"` for 1 CPU) | `string` | `"2Gi"` | no |
-| workers | Concurrent requests per replica ([`IMGPROXY_WORKERS`](https://docs.imgproxy.net/configuration/options#IMGPROXY_WORKERS)). Defaults to `cpu × 2`. | `number` | `null` | no |
-| timeout | Request timeout in seconds ([`IMGPROXY_TIMEOUT`](https://docs.imgproxy.net/configuration/options#IMGPROXY_TIMEOUT)) | `number` | `null` | no |
-
-### Scaling & Networking
-
-| Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
-| min_replicas | Minimum number of Container App replicas | `number` | `1` | no |
-| max_replicas | Maximum number of Container App replicas | `number` | `10` | no |
-| allow_unauthenticated | Allow public internet access. When `false` (default), app is internal-only within the Container App Environment. Forced to `true` when `enable_cdn = true`. | `bool` | `false` | no |
-| subnet_id | Subnet resource ID for Container App Environment VNet integration (used only when a new environment is created) | `string` | `null` | no |
-
-### Azure Front Door (CDN)
-
-| Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
-| enable_cdn | Enable Azure Front Door Standard | `bool` | `false` | no |
-| cdn_domains | Custom domain hostnames for the Front Door endpoint. Optional: the default `*.azurefd.net` hostname always works | `list(string)` | `[]` | no |
-| cdn_default_ttl | Cache TTL in seconds applied via Front Door rule set. Set to `0` to let the origin `Cache-Control` header control caching | `number` | `2628000` | no |
-| cdn_max_ttl | Maximum TTL (advisory — enforce via origin `Cache-Control`) | `number` | `31556926` | no |
-| cdn_client_ttl | Client TTL (advisory — enforce via origin `Cache-Control`) | `number` | `3600` | no |
-| cdn_negative_caching | Informational only — error response caching is not configurable in Front Door Standard | `bool` | `true` | no |
-| cdn_redirect_http_to_https | Redirect HTTP to HTTPS at Front Door level | `bool` | `true` | no |
-
-### Infrastructure
-
-| Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
-| container_app_environment_id | Resource ID of an existing Container App Environment. When null, a Consumption environment and Log Analytics workspace are created. | `string` | `null` | no |
-| identity_id | Resource ID of an existing User Assigned Managed Identity. When null, a dedicated identity is created. | `string` | `null` | no |
-| identity_principal_id | Principal ID of the existing identity. Required when `identity_id` is set. | `string` | `null` | no |
-| identity_client_id | Client ID of the existing identity. Required when `identity_id` is set and storage is configured. | `string` | `null` | no |
-
-## Outputs
-
-| Name | Description |
-|------|-------------|
-| url | HTTPS URL of the imgproxy Container App |
-| name | Container App name |
-| identity_id | Resource ID of the User Assigned Managed Identity |
-| location | Azure region of the deployment |
-| cdn_endpoint_hostname | Front Door endpoint hostname — create a CNAME to this (when CDN enabled) |
-| cdn_custom_domain_validation_tokens | Map of `domain → TXT validation token` for managed TLS certificate provisioning |
-| monitoring_workspace_id | Resource ID of the Log Analytics workspace used by Azure Monitor for OTEL data |
-| monitoring_application_insights_id | Resource ID of the Application Insights resource receiving OTEL data |
-
-## Architecture
-
-### Secrets
-
-All secrets are stored in Azure Key Vault and injected at runtime via Container Apps' native Key Vault reference feature. The module creates a User Assigned Managed Identity and grants it `Key Vault Secrets User` on each secret the module uses (one role assignment per secret, so the identity cannot read other secrets in the vault; pointing two environment variables at the same secret would create a duplicate assignment). Key Vault secret values never appear in Terraform state.
-
-Key Vault secret URIs follow the format:
-- Latest version: `https://<vault>.vault.azure.net/secrets/<name>`
-- Pinned version: `https://<vault>.vault.azure.net/secrets/<name>/<version-guid>`
-
-### Azure Blob Storage
-
-When `source_storage_accounts` is non-empty:
-- `IMGPROXY_USE_ABS=true` enables the `abs://` URL scheme
-- `AZURE_CLIENT_ID` is set to the managed identity's client ID so the Azure SDK selects the correct identity
-- `IMGPROXY_ABS_NAME` is set to the first account's name (override it in `environment` to pick another)
-- Use `abs://container/blob.jpg` in imgproxy URLs
-
-### Container App Environment
-
-When `container_app_environment_id` is null (default), the module creates:
-- A Log Analytics workspace (`<name>-logs`)
-- A Consumption plan Container App Environment (`<name>-env`)
-
-Provide `container_app_environment_id` to share an existing environment across multiple deployments.
-
-### Monitoring
-
-When `enable_monitoring = true`, the module creates:
-- An OpenTelemetry collector sidecar in the Container App
-- A workspace-based Application Insights resource
-- A Log Analytics workspace for monitoring when reusing an existing Container App Environment, or it reuses the module-managed workspace when creating a new environment
-
-imgproxy is configured automatically to emit OTLP data to `http://localhost:4318` using the sidecar.
-
-The default collector configuration exports traces, metrics, and logs to Azure Monitor. Override `otel_collector_config` if you need custom processors or additional exporters.
-
-### CDN (Azure Front Door Standard)
-
-When `enable_cdn = true`, the module creates:
-- A Front Door Standard profile
-- A Front Door endpoint (your CNAME target)
-- An origin group with health probes against `/health`
-- An origin pointing to the Container App's ingress FQDN
-- A rule set with cache TTL override
-- Custom domains with Azure-managed TLS certificates (one per entry in `cdn_domains`)
-
-The Container App remains internet-accessible so Front Door can reach it. For additional origin protection, configure IP restrictions or use Private Link (requires Front Door Premium).
-
-### Health Check
-
-```bash
-curl https://<your-container-app-fqdn>/health
-# imgproxy is running
-```
-
-## Security
-
-- **Private by default.** `allow_unauthenticated = false` keeps the app reachable only inside the Container Apps Environment. Set it to `true` to expose imgproxy to the internet. The examples do this as a testing opt-in.
-- **Request signing.** Leave `insecure = false` in production. Insecure mode lets anyone use your imgproxy: unlimited bandwidth costs and no control over what it processes.
-- **CDN origin is public.** With `enable_cdn = true` the Container App must be reachable by Front Door, so its own URL (the `url` output) is also directly reachable and bypasses the cache. Signature checks still apply on both paths. The module does not restrict the origin by IP: the `AzureFrontDoor.Backend` service tag is shared by all Front Door tenants, so it would not isolate your profile, and its size may exceed what Container Apps accepts as ingress IP rules. Use signing, and consider `ip_security_restriction` or a Premium Front Door with Private Link if you need a locked origin.
-- **Least privilege.** Key Vault access is granted per secret. Storage access is granted on the whole account (Reader for sources, Contributor for the cache): use dedicated storage accounts for imgproxy, and note that the Azure counterpart of an S3/GCS bucket is a container.
-- **Secrets.** Pass sensitive values through the `*_secret` / `secrets` inputs (Key Vault), not `environment`, which is stored as plain environment variables. With monitoring enabled, the Application Insights connection string is stored as a Container App secret and also appears in Terraform state: use an encrypted remote backend.
+Requires Terraform >= 1.5, an authenticated Azure CLI with [sufficient permissions](#permissions), and an existing resource group and Key Vault: the module creates neither.
 
 ## Examples
 
@@ -548,16 +42,200 @@ Start with [insecure](examples/insecure/) and follow the "Next" link at the end 
 - [insecure](examples/insecure/) - Minimal deployment without request signing (development only)
 - [signed](examples/signed/) - Production setup with URL signing
 - [blob](examples/blob/) - Private Blob Storage account as the image source
-- [cdn](examples/cdn/) - Azure Front Door CDN
+- [cdn](examples/cdn/) - Azure Front Door in front of the Container App
 - [pro](examples/pro/) - imgproxy Pro with license key and Blob Storage result cache
 - [complete](examples/complete/) - Full-featured deployment with Pro, monitoring, and Blob Storage
+
+The examples set `allow_unauthenticated = true` so that you can open them in a browser. Testing only.
+
+## Notes
+
+### Secure defaults
+
+Each insecure choice is an explicit, named opt-in:
+
+| Default | Opt-in | Acceptable for |
+|---------|--------|----------------|
+| The app is reachable only inside the Container Apps Environment | `allow_unauthenticated = true` | Testing, or a public deployment that relies on request signing. With `enable_cdn = true` it is forced on, see [Azure Front Door](#azure-front-door) |
+| Requests must be signed | `insecure = true` | Development: anyone can use your imgproxy, with unlimited bandwidth costs and no control over what it processes |
+
+### Permissions
+
+The deployer needs permissions to create Container Apps, managed identities, Log Analytics and Application Insights resources, and Front Door profiles in the resource group. Because the module creates role assignments, it also needs `Microsoft.Authorization/roleAssignments/write` on the Key Vault secrets and storage accounts it grants access to (for example `Role Based Access Control Administrator` or `User Access Administrator`). Use your own identity (`identity_id`, `identity_principal_id`, `identity_client_id`) to avoid creating one.
+
+The module reads no secret values. Key Vault secrets are referenced by URI and resolved by the Container App at runtime.
+
+### Key Vault access
+
+The Key Vault must use Azure RBAC authorization. The managed identity is granted `Key Vault Secrets User` on each secret the module uses, not on the whole vault, so it cannot read other secrets in the vault. Pointing two environment variables at the same secret creates a duplicate role assignment. `key_vault_id` is required when any secret is configured.
+
+Secret URIs follow the format `https://<vault>.vault.azure.net/secrets/<name>`, optionally followed by `/<version>` to pin a version. Without a version, the latest one is used.
+
+### Additional secrets
+
+`secrets` maps extra environment variables (named as in [imgproxy's configuration](https://docs.imgproxy.net/configuration)) to Key Vault secrets. `version` is optional (the latest version is used by default).
+
+```hcl
+secrets = {
+  IMGPROXY_SENTRY_DSN = { id = "https://my-vault.vault.azure.net/secrets/sentry-dsn" }
+}
+```
+
+Do not put sensitive values in `environment`: it becomes plain environment variables on the Container App.
+
+### Image delivery
+
+The Container App pulls `ghcr.io/imgproxy/imgproxy`, or `docker.imgproxy.pro/imgproxy` with `pro = true`, which requires `repo_password_secret` (a Key Vault secret holding the registry password; the username defaults to `imgproxy`). For your own image, set `repo` (without tag) and `tag` (a version, or a `sha256:` digest). A private registry also needs `repo_username` and `repo_password_secret`:
+
+```hcl
+repo          = "registry.example.com/imgproxy-custom"
+tag           = "my-tag"
+repo_username = "deploy"
+repo_password_secret = {
+  id = "https://my-vault.vault.azure.net/secrets/registry-password"
+}
+```
+
+`pro = true` only selects the default `repo` and enables Pro features; it has no effect on the image when `repo` is set. For docker.imgproxy.pro only `repo_password_secret` is required (the username defaults to `imgproxy`). Without `repo_password_secret` a custom `repo` must be pullable without authentication. The identity is granted read access to the secret, and the registry server is the host of `repo`.
+
+### Azure Blob Storage
+
+The module grants roles on existing storage accounts and does not create them. `source_storage_accounts` grants `Storage Blob Data Reader`, enables the `abs://` URL scheme and sets `IMGPROXY_ABS_NAME` to the first account's name (imgproxy reads from one account at a time; override it in `environment` to pick another). URLs look like `abs://<container>/<blob>`.
+
+`cache_storage_account` (Pro) grants `Storage Blob Data Contributor` and sets `IMGPROXY_CACHE_ABS_NAME`. Enable the cache through `environment`:
+
+```hcl
+environment = {
+  IMGPROXY_CACHE_USE    = "abs"
+  IMGPROXY_CACHE_BUCKET = "cache" # container name within the storage account
+}
+```
+
+Roles are assigned on the whole account, so use accounts dedicated to imgproxy. The cache account cannot also be a source account, because its write access would let imgproxy overwrite source images. The Azure counterpart of an S3 or GCS bucket is a container.
+
+### Scaling, monitoring and logs
+
+- The Container App scales between `min_replicas` and `max_replicas`. `cpu` and `memory` must be a valid Container Apps combination.
+- `enable_monitoring = true` adds an OpenTelemetry collector sidecar (OTLP on `localhost:4318`) exporting traces, metrics and logs to Application Insights. It reserves 0.25 CPU and 0.5Gi of memory; replace its configuration with `otel_collector_config`. The Application Insights connection string is stored as a Container App secret and also appears in Terraform state, so use an encrypted remote backend.
+- `/health` is served on port 8080. Container logs go to the Log Analytics workspace `<service_name>-logs` (30 days). imgproxy logs request URLs, which include signatures and source URLs, so restrict access to the workspace.
+
+### Azure Front Door
+
+`enable_cdn = true` puts Azure Front Door Standard in front of the Container App, on its default `*.azurefd.net` hostname (the `cdn_endpoint_hostname` output) or on your domains through `cdn_domains`. For each domain, create a DNS CNAME record to `cdn_endpoint_hostname` and a `_dnsauth` TXT record with the value from `cdn_custom_domain_validation_tokens`; Front Door then provisions a managed TLS certificate.
+
+The Container App must be reachable by Front Door, so its own URL (the `url` output) stays public and bypasses the cache. Signature checks still apply on both paths. The module does not restrict the origin by IP: the `AzureFrontDoor.Backend` service tag is shared by all Front Door tenants, so it would not isolate your profile. If you need a locked origin, consider a Premium Front Door with Private Link.
+
+Cache keys follow your imgproxy configuration (`Accept` with format detection, client hints, `IMGPROXY_CACHE_KEY_HEADERS` and `IMGPROXY_CACHE_KEY_COOKIES`). `secret_secret` cannot be combined with Front Door, which does not forward `Authorization`. `cdn_redirect_http_to_https = false` allows plain HTTP, which exposes signed URLs.
+
+### Vendored module
+
+`modules/imgproxy-common` is a generated copy of the module of the same name in `imgproxy/terraform-common`. Do not edit it here: change it upstream and run `sync.sh` from that repository.
+
+<!-- BEGIN_TF_DOCS -->
+## Requirements
+
+| Name | Version |
+| ---- | ------- |
+| terraform | >= 1.5 |
+| azurerm | ~> 4.0 |
+
+## Providers
+
+| Name | Version |
+| ---- | ------- |
+| azurerm | ~> 4.0 |
+
+## Modules
+
+| Name | Source | Version |
+| ---- | ------ | ------- |
+| imgproxy\_common | ./modules/imgproxy-common | n/a |
+
+## Resources
+
+| Name | Type |
+| ---- | ---- |
+| [azurerm_application_insights.monitoring](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/application_insights) | resource |
+| [azurerm_cdn_frontdoor_custom_domain.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/cdn_frontdoor_custom_domain) | resource |
+| [azurerm_cdn_frontdoor_custom_domain_association.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/cdn_frontdoor_custom_domain_association) | resource |
+| [azurerm_cdn_frontdoor_endpoint.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/cdn_frontdoor_endpoint) | resource |
+| [azurerm_cdn_frontdoor_origin.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/cdn_frontdoor_origin) | resource |
+| [azurerm_cdn_frontdoor_origin_group.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/cdn_frontdoor_origin_group) | resource |
+| [azurerm_cdn_frontdoor_profile.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/cdn_frontdoor_profile) | resource |
+| [azurerm_cdn_frontdoor_route.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/cdn_frontdoor_route) | resource |
+| [azurerm_cdn_frontdoor_rule.cache_ttl](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/cdn_frontdoor_rule) | resource |
+| [azurerm_cdn_frontdoor_rule_set.cache](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/cdn_frontdoor_rule_set) | resource |
+| [azurerm_container_app.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/container_app) | resource |
+| [azurerm_container_app_environment.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/container_app_environment) | resource |
+| [azurerm_log_analytics_workspace.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/log_analytics_workspace) | resource |
+| [azurerm_log_analytics_workspace.monitoring](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/log_analytics_workspace) | resource |
+| [azurerm_role_assignment.cache_storage](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
+| [azurerm_role_assignment.key_vault](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
+| [azurerm_role_assignment.source_storage](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment) | resource |
+| [azurerm_user_assigned_identity.imgproxy](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/user_assigned_identity) | resource |
+
+## Inputs
+
+| Name | Description | Type | Required |
+| ---- | ----------- | ---- | :------: |
+| resource\_group\_name | Name of the Azure resource group where all resources will be created. | `string` | yes |
+| allow\_unauthenticated | Allow public internet access to the Container App. Off by default: the app is reachable only from within the Container Apps Environment network. Set to true to expose it publicly (required to reach imgproxy directly from the internet without a CDN). Note: when enable\_cdn = true this is forced to true so Front Door can reach the origin, and the origin URL is then also directly reachable (signature checks still apply). | `bool` | no |
+| cache\_storage\_account | Resource ID of an Azure Storage Account for imgproxy result cache (imgproxy Pro only). The managed identity will be granted Storage Blob Data Contributor. Sets IMGPROXY\_CACHE\_ABS\_NAME to the account name; also set IMGPROXY\_CACHE\_USE = "abs" and IMGPROXY\_CACHE\_BUCKET (container name) in environment. | `string` | no |
+| cdn\_client\_ttl | Client (browser) TTL in seconds. Enforce via origin Cache-Control headers; not directly configurable in Front Door Standard. | `number` | no |
+| cdn\_default\_ttl | Default cache TTL in seconds applied via Front Door rule set. | `number` | no |
+| cdn\_domains | Custom domain hostnames to attach to the Front Door endpoint (e.g. ["cdn.example.com"]). Azure-managed TLS certificates are provisioned automatically. Optional: the default *.azurefd.net endpoint (cdn\_endpoint\_hostname) is always available over HTTPS. | `list(string)` | no |
+| cdn\_max\_ttl | Maximum cache TTL in seconds. Informational in Front Door Standard; enforce via origin Cache-Control headers. | `number` | no |
+| cdn\_negative\_caching | Informational only in Azure Front Door Standard — error response caching is not configurable at this tier. | `bool` | no |
+| cdn\_redirect\_http\_to\_https | Redirect HTTP traffic to HTTPS at the Front Door level. | `bool` | no |
+| container\_app\_environment\_id | Resource ID of an existing Container App Environment. When null, a new Consumption environment (with Log Analytics workspace) is created. | `string` | no |
+| cpu | CPU cores for the container (e.g. 0.5, 1.0, 2.0). Must be a valid Container Apps CPU value. | `number` | no |
+| enable\_cdn | Enable Azure Front Door Standard for CDN caching and global distribution. | `bool` | no |
+| enable\_monitoring | Enable the OpenTelemetry collector sidecar and export traces, metrics, and logs to Azure Monitor by default. Automatically configures imgproxy OTEL environment variables. | `bool` | no |
+| environment | Additional environment variables passed to imgproxy (e.g. IMGPROXY\_MAX\_SRC\_RESOLUTION). | `map(string)` | no |
+| identity\_client\_id | Client (application) ID of the managed identity. Used to set AZURE\_CLIENT\_ID so imgproxy picks the correct identity for Azure Blob Storage access. Required when identity\_id is set and storage is configured. | `string` | no |
+| identity\_id | Resource ID of an existing User Assigned Managed Identity. When null, a dedicated identity is created automatically. | `string` | no |
+| identity\_principal\_id | Principal (object) ID of the managed identity. Required when identity\_id is set so that role assignments can be created. | `string` | no |
+| insecure | Disable URL signature checks. When true, key and salt are not required. | `bool` | no |
+| key\_vault\_id | Resource ID of the Azure Key Vault that holds imgproxy secrets. The managed identity will be granted Key Vault Secrets User on each secret the module uses (not on the whole vault). Required when any secrets are configured. | `string` | no |
+| keys\_secret | Key Vault secret URI for imgproxy signing keys (comma-separated hex-encoded values). Required when insecure = false. Generate each key: openssl rand -hex 64. Sets IMGPROXY\_KEY (https://docs.imgproxy.net/configuration/options#IMGPROXY_KEY). | ```object({ id = string version = optional(string, "") })``` | no |
+| location | Azure region for all resources (e.g. "eastus", "westeurope"). | `string` | no |
+| max\_replicas | Maximum number of Container App replicas. | `number` | no |
+| memory | Memory limit for the container (e.g. "1Gi", "2Gi"). Must match the CPU value per Container Apps requirements. | `string` | no |
+| min\_replicas | Minimum number of Container App replicas (set to 1 to avoid cold starts). | `number` | no |
+| otel\_collector\_config | OpenTelemetry collector config passed to the OTEL sidecar when monitoring is enabled. Supports collector environment variable expansion such as ${env:APPLICATIONINSIGHTS\_CONNECTION\_STRING}. | `string` | no |
+| pro | Use imgproxy Pro (docker.imgproxy.pro) instead of the community image (ghcr.io). | `bool` | no |
+| pro\_license\_key\_secret | Key Vault secret URI for the imgproxy Pro license key. Sets IMGPROXY\_LICENSE\_KEY (https://docs.imgproxy.net/configuration/options#IMGPROXY_LICENSE_KEY). | ```object({ id = string version = optional(string, "") })``` | no |
+| repo | Custom container repository to use. When set, overrides the repository constructed from 'pro'. Combined with 'tag' to form the full image reference (e.g. 'myregistry.azurecr.io/imgproxy'). For a private registry set repo\_username and repo\_password\_secret. | `string` | no |
+| repo\_password\_secret | Key Vault secret URI for the registry password (for docker.imgproxy.pro, or for 'repo' when set). Required when pro = true and repo is not set. The identity is granted read access to this secret. | ```object({ id = string version = optional(string, "") })``` | no |
+| repo\_username | Username for the registry in 'repo'. Defaults to 'imgproxy' for docker.imgproxy.pro when 'repo' is not set. Required with repo\_password\_secret otherwise. | `string` | no |
+| salts\_secret | Key Vault secret URI for imgproxy signing salts (comma-separated hex-encoded values). Must match the number of keys. Required when insecure = false. Sets IMGPROXY\_SALT (https://docs.imgproxy.net/configuration/options#IMGPROXY_SALT). | ```object({ id = string version = optional(string, "") })``` | no |
+| secret\_secret | Key Vault secret URI for the authorization token. When set, requests must include Authorization: Bearer <token>. Sets IMGPROXY\_SECRET (https://docs.imgproxy.net/configuration/options#IMGPROXY_SECRET). | ```object({ id = string version = optional(string, "") })``` | no |
+| secrets | Map of environment variable names to Key Vault secret URIs. Example: {IMGPROXY\_NEW\_RELIC\_KEY = { id = "https://vault.vault.azure.net/secrets/newrelic-key" }}. | ```map(object({ id = string version = optional(string, "") }))``` | no |
+| service\_name | Prefix applied to every resource name. | `string` | no |
+| signature\_size | Number of bytes from the key/salt used for signing. Sets IMGPROXY\_SIGNATURE\_SIZE (https://docs.imgproxy.net/configuration/options#IMGPROXY_SIGNATURE_SIZE). | `number` | no |
+| source\_storage\_accounts | Resource IDs of Azure Storage Accounts containing source images. The managed identity will be granted Storage Blob Data Reader on each. When non-empty, enables IMGPROXY\_USE\_ABS (https://docs.imgproxy.net/configuration/options#IMGPROXY_USE_ABS) and sets IMGPROXY\_ABS\_NAME to the first account's name (imgproxy reads from a single account; override IMGPROXY\_ABS\_NAME in environment to pick another). | `list(string)` | no |
+| source\_url\_encryption\_key\_secret | Key Vault secret URI for the source URL encryption key. Sets IMGPROXY\_SOURCE\_URL\_ENCRYPTION\_KEY (https://docs.imgproxy.net/configuration/options#IMGPROXY_SOURCE_URL_ENCRYPTION_KEY). | ```object({ id = string version = optional(string, "") })``` | no |
+| subnet\_id | Resource ID of the subnet for Container App Environment VNet integration. Only used when container\_app\_environment\_id is null (a new environment is being created). | `string` | no |
+| tag | imgproxy image tag (version). | `string` | no |
+| tags | Azure resource tags applied to all created resources. | `map(string)` | no |
+| timeout | Request timeout in seconds. Sets IMGPROXY\_TIMEOUT (https://docs.imgproxy.net/configuration/options#IMGPROXY_TIMEOUT). | `number` | no |
+| trusted\_signatures\_secret | Key Vault secret URI for trusted signature prefixes. imgproxy Pro only. Sets IMGPROXY\_TRUSTED\_SIGNATURES (https://docs.imgproxy.net/configuration/options#IMGPROXY_TRUSTED_SIGNATURES). | ```object({ id = string version = optional(string, "") })``` | no |
+| workers | Number of concurrent requests per replica. Sets IMGPROXY\_WORKERS (https://docs.imgproxy.net/configuration/options#IMGPROXY_WORKERS). Defaults to cpu × 2. | `number` | no |
+
+## Outputs
+
+| Name | Description |
+| ---- | ----------- |
+| cdn\_custom\_domain\_validation\_tokens | Map of domain → DNS TXT validation token required to activate managed TLS certificates for custom domains. |
+| cdn\_endpoint\_hostname | Hostname of the Front Door endpoint. Create a CNAME record pointing your domain to this hostname. Null when CDN is disabled. |
+| identity\_id | Resource ID of the User Assigned Managed Identity used by the Container App. |
+| location | The Azure region where the Container App is deployed. |
+| monitoring\_application\_insights\_id | Resource ID of the Application Insights resource receiving OTEL data. Null when monitoring is disabled. |
+| monitoring\_workspace\_id | Resource ID of the Log Analytics workspace used by Azure Monitor for OTEL data. Null when monitoring is disabled. |
+| name | The Container App name. |
+| url | The HTTPS URL of the imgproxy Container App. |
+<!-- END_TF_DOCS -->
 
 ## License
 
 MIT
-
-## Support
-
-For imgproxy configuration questions, see the [official documentation](https://docs.imgproxy.net/).
-
-For Terraform module issues, please open a GitHub issue.
