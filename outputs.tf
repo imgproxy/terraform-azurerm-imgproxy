@@ -20,12 +20,12 @@ output "location" {
 
 output "cdn_endpoint_hostname" {
   description = "Hostname of the Front Door endpoint. Create a CNAME record pointing your domain to this hostname. Null when CDN is disabled."
-  value       = var.enable_cdn ? azurerm_cdn_frontdoor_endpoint.main[0].host_name : null
+  value       = local.enable_frontdoor ? azurerm_cdn_frontdoor_endpoint.main[0].host_name : null
 }
 
 output "cdn_custom_domain_validation_tokens" {
   description = "Map of domain → DNS TXT validation token required to activate managed TLS certificates for custom domains."
-  value = var.enable_cdn ? {
+  value = local.enable_frontdoor ? {
     for d in azurerm_cdn_frontdoor_custom_domain.main :
     d.host_name => d.validation_token
   } : {}

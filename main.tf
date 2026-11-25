@@ -1,4 +1,8 @@
 locals {
+  # enable_cdn is a deprecated alias of enable_frontdoor; setting both to different values fails
+  # (see the precondition on the Container App).
+  enable_frontdoor = coalesce(var.enable_frontdoor, var.enable_cdn, false)
+
   # Custom repo wins; otherwise the Pro or community image
   image_repo = var.repo != null ? var.repo : (var.pro ? "docker.imgproxy.pro/imgproxy" : "ghcr.io/imgproxy/imgproxy")
 }
@@ -359,7 +363,7 @@ resource "azurerm_container_app" "main" {
   }
 
   ingress {
-    external_enabled           = var.enable_cdn ? true : var.allow_unauthenticated
+    external_enabled           = local.enable_frontdoor ? true : var.allow_unauthenticated
     target_port                = 8080
     transport                  = "http"
     allow_insecure_connections = false
@@ -384,8 +388,13 @@ resource "azurerm_container_app" "main" {
     }
 
     precondition {
-      condition     = !var.enable_cdn || var.secret_secret == null
-      error_message = "secret_secret cannot be used with enable_cdn = true. Azure Front Door does not forward the Authorization header."
+      condition     = !local.enable_frontdoor || var.secret_secret == null
+      error_message = "secret_secret cannot be used with enable_frontdoor = true. Azure Front Door does not forward the Authorization header."
+    }
+
+    precondition {
+      condition     = var.enable_frontdoor == null || var.enable_cdn == null || var.enable_frontdoor == var.enable_cdn
+      error_message = "enable_cdn is deprecated and conflicts with enable_frontdoor: remove enable_cdn and set only enable_frontdoor."
     }
   }
 
@@ -400,7 +409,7 @@ resource "azurerm_container_app" "main" {
 # ── Azure Front Door Standard (CDN) ───────────────────────────────────────────
 
 resource "azurerm_cdn_frontdoor_profile" "main" {
-  count               = var.enable_cdn ? 1 : 0
+  count               = local.enable_frontdoor ? 1 : 0
   name                = "${var.service_name}-afd"
   resource_group_name = var.resource_group_name
   sku_name            = "Standard_AzureFrontDoor"
@@ -408,14 +417,14 @@ resource "azurerm_cdn_frontdoor_profile" "main" {
 }
 
 resource "azurerm_cdn_frontdoor_endpoint" "main" {
-  count                    = var.enable_cdn ? 1 : 0
+  count                    = local.enable_frontdoor ? 1 : 0
   name                     = "${var.service_name}-endpoint"
   cdn_frontdoor_profile_id = azurerm_cdn_frontdoor_profile.main[0].id
   tags                     = var.tags
 }
 
 resource "azurerm_cdn_frontdoor_origin_group" "main" {
-  count                    = var.enable_cdn ? 1 : 0
+  count                    = local.enable_frontdoor ? 1 : 0
   name                     = "${var.service_name}-origin-group"
   cdn_frontdoor_profile_id = azurerm_cdn_frontdoor_profile.main[0].id
   session_affinity_enabled = false
@@ -435,7 +444,7 @@ resource "azurerm_cdn_frontdoor_origin_group" "main" {
 }
 
 resource "azurerm_cdn_frontdoor_origin" "main" {
-  count                         = var.enable_cdn ? 1 : 0
+  count                         = local.enable_frontdoor ? 1 : 0
   name                          = "${var.service_name}-origin"
   cdn_frontdoor_origin_group_id = azurerm_cdn_frontdoor_origin_group.main[0].id
   enabled                       = true
@@ -450,7 +459,7 @@ resource "azurerm_cdn_frontdoor_origin" "main" {
 }
 
 resource "azurerm_cdn_frontdoor_custom_domain" "main" {
-  for_each                 = var.enable_cdn ? toset(var.cdn_domains) : toset([])
+  for_each                 = local.enable_frontdoor ? toset(var.cdn_domains) : toset([])
   name                     = replace(each.value, ".", "-")
   cdn_frontdoor_profile_id = azurerm_cdn_frontdoor_profile.main[0].id
   host_name                = each.value
@@ -462,13 +471,13 @@ resource "azurerm_cdn_frontdoor_custom_domain" "main" {
 
 # Cache TTL and query string behavior via rule set
 resource "azurerm_cdn_frontdoor_rule_set" "cache" {
-  count                    = var.enable_cdn ? 1 : 0
+  count                    = local.enable_frontdoor ? 1 : 0
   name                     = "${replace(var.service_name, "-", "")}cache"
   cdn_frontdoor_profile_id = azurerm_cdn_frontdoor_profile.main[0].id
 }
 
 resource "azurerm_cdn_frontdoor_rule" "cache_ttl" {
-  count                     = var.enable_cdn ? 1 : 0
+  count                     = local.enable_frontdoor ? 1 : 0
   name                      = "SetCacheTTL"
   cdn_frontdoor_rule_set_id = azurerm_cdn_frontdoor_rule_set.cache[0].id
   order                     = 1
@@ -504,7 +513,7 @@ resource "azurerm_cdn_frontdoor_rule" "cache_ttl" {
 }
 
 resource "azurerm_cdn_frontdoor_route" "main" {
-  count                         = var.enable_cdn ? 1 : 0
+  count                         = local.enable_frontdoor ? 1 : 0
   name                          = "${var.service_name}-route"
   cdn_frontdoor_endpoint_id     = azurerm_cdn_frontdoor_endpoint.main[0].id
   cdn_frontdoor_origin_group_id = azurerm_cdn_frontdoor_origin_group.main[0].id
@@ -528,7 +537,7 @@ resource "azurerm_cdn_frontdoor_route" "main" {
 }
 
 resource "azurerm_cdn_frontdoor_custom_domain_association" "main" {
-  for_each                       = var.enable_cdn ? azurerm_cdn_frontdoor_custom_domain.main : {}
+  for_each                       = local.enable_frontdoor ? azurerm_cdn_frontdoor_custom_domain.main : {}
   cdn_frontdoor_custom_domain_id = each.value.id
   cdn_frontdoor_route_ids        = [azurerm_cdn_frontdoor_route.main[0].id]
 }

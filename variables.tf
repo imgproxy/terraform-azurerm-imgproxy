@@ -252,7 +252,7 @@ variable "otel_collector_config" {
 variable "allow_unauthenticated" {
   type        = bool
   default     = false
-  description = "Allow public internet access to the Container App. Off by default: the app is reachable only from within the Container Apps Environment network. Set to true to expose it publicly (required to reach imgproxy directly from the internet without a CDN). Note: when enable_cdn = true this is forced to true so Front Door can reach the origin, and the origin URL is then also directly reachable (signature checks still apply)."
+  description = "Allow public internet access to the Container App. Off by default: the app is reachable only from within the Container Apps Environment network. Set to true to expose it publicly (required to reach imgproxy directly from the internet without a CDN). Note: when enable_frontdoor = true this is forced to true so Front Door can reach the origin, and the origin URL is then also directly reachable (signature checks still apply)."
 }
 
 variable "subnet_id" {
@@ -263,10 +263,17 @@ variable "subnet_id" {
 
 # ── Azure Front Door (CDN) ────────────────────────────────────────────────────
 
+variable "enable_frontdoor" {
+  type        = bool
+  default     = null
+  description = "Enable Azure Front Door Standard for CDN caching and global distribution. Defaults to false when null."
+}
+
 variable "enable_cdn" {
   type        = bool
-  default     = false
-  description = "Enable Azure Front Door Standard for CDN caching and global distribution."
+  default     = null
+  deprecated  = "Use enable_frontdoor instead."
+  description = "Deprecated: use enable_frontdoor. Setting both to different values is an error."
 }
 
 variable "cdn_domains" {

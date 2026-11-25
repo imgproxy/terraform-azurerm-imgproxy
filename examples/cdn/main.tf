@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.5"
+  required_version = ">= 1.15"
 
   required_providers {
     azurerm = {
@@ -57,7 +57,7 @@ module "imgproxy" {
     id = "${local.secrets_uri}/imgproxy-salts"
   }
 
-  enable_cdn = true
+  enable_frontdoor = true
 
   # With a domain, Front Door provisions a managed TLS certificate for it:
   # cdn_domains = ["cdn.example.com"]

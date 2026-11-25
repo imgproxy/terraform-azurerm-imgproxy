@@ -85,4 +85,4 @@ az keyvault purge --name $KEY_VAULT
 
 ## Next
 
-Continue with [blob](../blob/).
+Continue with [scaling](../scaling/).

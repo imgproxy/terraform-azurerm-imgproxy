@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.5"
+  required_version = ">= 1.15"
 
   required_providers {
     azurerm = {
@@ -83,7 +83,7 @@ module "imgproxy" {
   }
   signature_size = 32
 
-  # Optional: Bearer token auth (cannot be used with enable_cdn = true)
+  # Optional: Bearer token auth (cannot be used with enable_frontdoor = true)
   # secret_secret = {
   #   id = "${local.secrets_uri}/imgproxy-secret"
   # }
@@ -137,7 +137,7 @@ module "imgproxy" {
   allow_unauthenticated = true
 
   # Optional: Azure Front Door CDN
-  # enable_cdn                 = true
+  # enable_frontdoor                 = true
   # cdn_domains                = ["cdn.example.com"]
   # cdn_default_ttl            = 3600
   # cdn_redirect_http_to_https = true

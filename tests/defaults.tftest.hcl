@@ -159,8 +159,8 @@ run "cdn_with_domains" {
   command = plan
 
   variables {
-    enable_cdn  = true
-    cdn_domains = ["cdn.example.com"]
+    enable_frontdoor = true
+    cdn_domains      = ["cdn.example.com"]
   }
 
   assert {
@@ -188,9 +188,9 @@ run "timeout_sets_env_var_and_cdn" {
   command = apply
 
   variables {
-    timeout     = 120
-    enable_cdn  = true
-    cdn_domains = ["cdn.example.com"]
+    timeout          = 120
+    enable_frontdoor = true
+    cdn_domains      = ["cdn.example.com"]
   }
 
   assert {
@@ -261,8 +261,8 @@ run "cdn_forces_external_ingress" {
   command = plan
 
   variables {
-    enable_cdn  = true
-    cdn_domains = ["cdn.example.com"]
+    enable_frontdoor = true
+    cdn_domains      = ["cdn.example.com"]
   }
 
   assert {

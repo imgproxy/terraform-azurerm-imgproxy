@@ -92,7 +92,7 @@ run "accepts_cdn_without_domains" {
   command = plan
 
   variables {
-    enable_cdn = true
+    enable_frontdoor = true
   }
 
   assert {
@@ -101,12 +101,50 @@ run "accepts_cdn_without_domains" {
   }
 }
 
+run "deprecated_enable_cdn_still_enables_frontdoor" {
+  command = plan
+
+  variables {
+    enable_cdn = true
+  }
+
+  assert {
+    condition     = length(azurerm_cdn_frontdoor_endpoint.main) == 1
+    error_message = "The deprecated enable_cdn must still create the Front Door endpoint"
+  }
+}
+
+run "accepts_matching_enable_cdn_and_enable_frontdoor" {
+  command = plan
+
+  variables {
+    enable_cdn       = true
+    enable_frontdoor = true
+  }
+
+  assert {
+    condition     = length(azurerm_cdn_frontdoor_endpoint.main) == 1
+    error_message = "Equal enable_cdn and enable_frontdoor must be accepted"
+  }
+}
+
+run "rejects_conflicting_enable_cdn_and_enable_frontdoor" {
+  command = plan
+
+  variables {
+    enable_cdn       = true
+    enable_frontdoor = false
+  }
+
+  expect_failures = [azurerm_container_app.main]
+}
+
 run "rejects_cdn_with_secret_secret" {
   command = plan
 
   variables {
-    enable_cdn  = true
-    cdn_domains = ["cdn.example.com"]
+    enable_frontdoor = true
+    cdn_domains      = ["cdn.example.com"]
     secret_secret = {
       id      = "https://test-kv.vault.azure.net/secrets/secret"
       version = ""

@@ -33,7 +33,7 @@ module "imgproxy" {
 }
 ```
 
-Requires Terraform >= 1.5, an authenticated Azure CLI with [sufficient permissions](#permissions), and an existing resource group and Key Vault: the module creates neither.
+Requires Terraform >= 1.15, an authenticated Azure CLI with [sufficient permissions](#permissions), and an existing resource group and Key Vault: the module creates neither.
 
 ## Examples
 
@@ -41,6 +41,7 @@ Start with [insecure](examples/insecure/) and follow the "Next" link at the end 
 
 - [insecure](examples/insecure/) - Minimal deployment without request signing (development only)
 - [signed](examples/signed/) - Production setup with URL signing
+- [scaling](examples/scaling/) - Replica size and count, concurrency per replica
 - [blob](examples/blob/) - Private Blob Storage account as the image source
 - [cdn](examples/cdn/) - Azure Front Door in front of the Container App
 - [pro](examples/pro/) - imgproxy Pro with license key and Blob Storage result cache
@@ -56,7 +57,7 @@ Each insecure choice is an explicit, named opt-in:
 
 | Default | Opt-in | Acceptable for |
 |---------|--------|----------------|
-| The app is reachable only inside the Container Apps Environment | `allow_unauthenticated = true` | Testing, or a public deployment that relies on request signing. With `enable_cdn = true` it is forced on, see [Azure Front Door](#azure-front-door) |
+| The app is reachable only inside the Container Apps Environment | `allow_unauthenticated = true` | Testing, or a public deployment that relies on request signing. With `enable_frontdoor = true` it is forced on, see [Azure Front Door](#azure-front-door) |
 | Requests must be signed | `insecure = true` | Development: anyone can use your imgproxy, with unlimited bandwidth costs and no control over what it processes |
 
 ### Permissions
@@ -121,7 +122,7 @@ Roles are assigned on the whole account, so use accounts dedicated to imgproxy. 
 
 ### Azure Front Door
 
-`enable_cdn = true` puts Azure Front Door Standard in front of the Container App, on its default `*.azurefd.net` hostname (the `cdn_endpoint_hostname` output) or on your domains through `cdn_domains`. For each domain, create a DNS CNAME record to `cdn_endpoint_hostname` and a `_dnsauth` TXT record with the value from `cdn_custom_domain_validation_tokens`; Front Door then provisions a managed TLS certificate.
+`enable_frontdoor = true` puts Azure Front Door Standard in front of the Container App, on its default `*.azurefd.net` hostname (the `cdn_endpoint_hostname` output) or on your domains through `cdn_domains`. For each domain, create a DNS CNAME record to `cdn_endpoint_hostname` and a `_dnsauth` TXT record with the value from `cdn_custom_domain_validation_tokens`; Front Door then provisions a managed TLS certificate.
 
 The Container App must be reachable by Front Door, so its own URL (the `url` output) stays public and bypasses the cache. Signature checks still apply on both paths. The module does not restrict the origin by IP: the `AzureFrontDoor.Backend` service tag is shared by all Front Door tenants, so it would not isolate your profile. If you need a locked origin, consider a Premium Front Door with Private Link.
 
@@ -136,7 +137,7 @@ Cache keys follow your imgproxy configuration (`Accept` with format detection, c
 
 | Name | Version |
 | ---- | ------- |
-| terraform | >= 1.5 |
+| terraform | >= 1.15 |
 | azurerm | ~> 4.0 |
 
 ## Providers
@@ -179,7 +180,7 @@ Cache keys follow your imgproxy configuration (`Accept` with format detection, c
 | Name | Description | Type | Required |
 | ---- | ----------- | ---- | :------: |
 | resource\_group\_name | Name of the Azure resource group where all resources will be created. | `string` | yes |
-| allow\_unauthenticated | Allow public internet access to the Container App. Off by default: the app is reachable only from within the Container Apps Environment network. Set to true to expose it publicly (required to reach imgproxy directly from the internet without a CDN). Note: when enable\_cdn = true this is forced to true so Front Door can reach the origin, and the origin URL is then also directly reachable (signature checks still apply). | `bool` | no |
+| allow\_unauthenticated | Allow public internet access to the Container App. Off by default: the app is reachable only from within the Container Apps Environment network. Set to true to expose it publicly (required to reach imgproxy directly from the internet without a CDN). Note: when enable\_frontdoor = true this is forced to true so Front Door can reach the origin, and the origin URL is then also directly reachable (signature checks still apply). | `bool` | no |
 | cache\_storage\_account | Resource ID of an Azure Storage Account for imgproxy result cache (imgproxy Pro only). The managed identity will be granted Storage Blob Data Contributor. Sets IMGPROXY\_CACHE\_ABS\_NAME to the account name; also set IMGPROXY\_CACHE\_USE = "abs" and IMGPROXY\_CACHE\_BUCKET (container name) in environment. | `string` | no |
 | cdn\_client\_ttl | Client (browser) TTL in seconds. Enforce via origin Cache-Control headers; not directly configurable in Front Door Standard. | `number` | no |
 | cdn\_default\_ttl | Default cache TTL in seconds applied via Front Door rule set. | `number` | no |
@@ -189,7 +190,8 @@ Cache keys follow your imgproxy configuration (`Accept` with format detection, c
 | cdn\_redirect\_http\_to\_https | Redirect HTTP traffic to HTTPS at the Front Door level. | `bool` | no |
 | container\_app\_environment\_id | Resource ID of an existing Container App Environment. When null, a new Consumption environment (with Log Analytics workspace) is created. | `string` | no |
 | cpu | CPU cores for the container (e.g. 0.5, 1.0, 2.0). Must be a valid Container Apps CPU value. | `number` | no |
-| enable\_cdn | Enable Azure Front Door Standard for CDN caching and global distribution. | `bool` | no |
+| enable\_cdn | Deprecated: use enable\_frontdoor. Setting both to different values is an error. | `bool` | no |
+| enable\_frontdoor | Enable Azure Front Door Standard for CDN caching and global distribution. Defaults to false when null. | `bool` | no |
 | enable\_monitoring | Enable the OpenTelemetry collector sidecar and export traces, metrics, and logs to Azure Monitor by default. Automatically configures imgproxy OTEL environment variables. | `bool` | no |
 | environment | Additional environment variables passed to imgproxy (e.g. IMGPROXY\_MAX\_SRC\_RESOLUTION). | `map(string)` | no |
 | identity\_client\_id | Client (application) ID of the managed identity. Used to set AZURE\_CLIENT\_ID so imgproxy picks the correct identity for Azure Blob Storage access. Required when identity\_id is set and storage is configured. | `string` | no |
