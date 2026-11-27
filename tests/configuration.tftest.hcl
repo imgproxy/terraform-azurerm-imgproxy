@@ -238,6 +238,32 @@ run "storage_account_names_from_ids" {
   }
 }
 
+run "cache_storage_account_sets_cache_env" {
+  command = plan
+
+  variables {
+    identity_id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id"
+    identity_principal_id = "11111111-1111-1111-1111-111111111111"
+    identity_client_id    = "22222222-2222-2222-2222-222222222222"
+    cache_storage_account = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Storage/storageAccounts/cacheacct"
+    cache_container       = "results"
+  }
+
+  assert {
+    condition     = local.env_vars["IMGPROXY_CACHE_USE"] == "abs" && local.env_vars["IMGPROXY_CACHE_BUCKET"] == "results"
+    error_message = "cache_storage_account must set IMGPROXY_CACHE_USE and IMGPROXY_CACHE_BUCKET from cache_container"
+  }
+}
+
+run "no_cache_env_without_cache_storage_account" {
+  command = plan
+
+  assert {
+    condition     = !contains(keys(local.env_vars), "IMGPROXY_CACHE_USE")
+    error_message = "Cache env vars must not be set without cache_storage_account"
+  }
+}
+
 run "environment_overrides_account_name" {
   command = plan
 

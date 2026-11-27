@@ -103,14 +103,7 @@ repo_password_secret = {
 
 The module grants roles on existing storage accounts and does not create them. `source_storage_accounts` grants `Storage Blob Data Reader`, enables the `abs://` URL scheme and sets `IMGPROXY_ABS_NAME` to the first account's name (imgproxy reads from one account at a time; override it in `environment` to pick another). URLs look like `abs://<container>/<blob>`.
 
-`cache_storage_account` (Pro) grants `Storage Blob Data Contributor` and sets `IMGPROXY_CACHE_ABS_NAME`. Enable the cache through `environment`:
-
-```hcl
-environment = {
-  IMGPROXY_CACHE_USE    = "abs"
-  IMGPROXY_CACHE_BUCKET = "cache" # container name within the storage account
-}
-```
+`cache_storage_account` (Pro) grants `Storage Blob Data Contributor` and sets `IMGPROXY_CACHE_ABS_NAME`, `IMGPROXY_CACHE_USE=abs` and `IMGPROXY_CACHE_BUCKET`. The blob container defaults to `cache` (`cache_container`) and must already exist; entries in `environment` override these.
 
 Roles are assigned on the whole account, so use accounts dedicated to imgproxy. The cache account cannot also be a source account, because its write access would let imgproxy overwrite source images. The Azure counterpart of an S3 or GCS bucket is a container.
 
@@ -181,7 +174,8 @@ Cache keys follow your imgproxy configuration (`Accept` with format detection, c
 | ---- | ----------- | ---- | :------: |
 | resource\_group\_name | Name of the Azure resource group where all resources will be created. | `string` | yes |
 | allow\_unauthenticated | Allow public internet access to the Container App. Off by default: the app is reachable only from within the Container Apps Environment network. Set to true to expose it publicly (required to reach imgproxy directly from the internet without a CDN). Note: when enable\_frontdoor = true this is forced to true so Front Door can reach the origin, and the origin URL is then also directly reachable (signature checks still apply). | `bool` | no |
-| cache\_storage\_account | Resource ID of an Azure Storage Account for imgproxy result cache (imgproxy Pro only). The managed identity will be granted Storage Blob Data Contributor. Sets IMGPROXY\_CACHE\_ABS\_NAME to the account name; also set IMGPROXY\_CACHE\_USE = "abs" and IMGPROXY\_CACHE\_BUCKET (container name) in environment. | `string` | no |
+| cache\_container | Blob container within cache\_storage\_account used for the imgproxy result cache (IMGPROXY\_CACHE\_BUCKET). The container must already exist. Only used when cache\_storage\_account is set. | `string` | no |
+| cache\_storage\_account | Resource ID of an Azure Storage Account for imgproxy result cache (imgproxy Pro only). The managed identity will be granted Storage Blob Data Contributor. Sets IMGPROXY\_CACHE\_ABS\_NAME to the account name; also sets IMGPROXY\_CACHE\_USE = "abs" and IMGPROXY\_CACHE\_BUCKET (from cache\_container); entries in environment override them. | `string` | no |
 | cdn\_client\_ttl | Client (browser) TTL in seconds. Enforce via origin Cache-Control headers; not directly configurable in Front Door Standard. | `number` | no |
 | cdn\_default\_ttl | Default cache TTL in seconds applied via Front Door rule set. | `number` | no |
 | cdn\_domains | Custom domain hostnames to attach to the Front Door endpoint (e.g. ["cdn.example.com"]). Azure-managed TLS certificates are provisioned automatically. Optional: the default *.azurefd.net endpoint (cdn\_endpoint\_hostname) is always available over HTTPS. | `list(string)` | no |

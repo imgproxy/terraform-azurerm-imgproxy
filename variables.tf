@@ -154,7 +154,13 @@ variable "source_storage_accounts" {
 variable "cache_storage_account" {
   type        = string
   default     = null
-  description = "Resource ID of an Azure Storage Account for imgproxy result cache (imgproxy Pro only). The managed identity will be granted Storage Blob Data Contributor. Sets IMGPROXY_CACHE_ABS_NAME to the account name; also set IMGPROXY_CACHE_USE = \"abs\" and IMGPROXY_CACHE_BUCKET (container name) in environment."
+  description = "Resource ID of an Azure Storage Account for imgproxy result cache (imgproxy Pro only). The managed identity will be granted Storage Blob Data Contributor. Sets IMGPROXY_CACHE_ABS_NAME to the account name; also sets IMGPROXY_CACHE_USE = \"abs\" and IMGPROXY_CACHE_BUCKET (from cache_container); entries in environment override them."
+}
+
+variable "cache_container" {
+  type        = string
+  default     = "cache"
+  description = "Blob container within cache_storage_account used for the imgproxy result cache (IMGPROXY_CACHE_BUCKET). The container must already exist. Only used when cache_storage_account is set."
 }
 
 # ── Scaling ───────────────────────────────────────────────────────────────────

@@ -83,11 +83,6 @@ module "imgproxy" {
   # Existing storage account (see README): grants Storage Blob Data Contributor for the
   # processed-result cache (Pro) and sets IMGPROXY_CACHE_ABS_NAME to the account name
   cache_storage_account = data.azurerm_storage_account.cache.id
-
-  environment = {
-    IMGPROXY_CACHE_USE    = "abs"
-    IMGPROXY_CACHE_BUCKET = "cache" # container name within the storage account
-  }
 }
 
 output "url" {

@@ -146,8 +146,6 @@ module "imgproxy" {
   environment = {
     IMGPROXY_MAX_SRC_RESOLUTION = "50.0"
     IMGPROXY_JPEG_PROGRESSIVE   = "true"
-    IMGPROXY_CACHE_USE          = "abs"
-    IMGPROXY_CACHE_BUCKET       = "cache"
   }
 }
 
